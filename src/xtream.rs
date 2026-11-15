@@ -367,17 +367,22 @@ where
 {
     url.query_pairs_mut().append_pair("action", action);
     // without_url: the request URL carries the credentials.
-    let data = CLIENT
+    let mut response = CLIENT
         .get(url)
         .header(reqwest::header::USER_AGENT, user_agent)
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| e.without_url())?
-        .json::<T>()
-        .await
         .map_err(|e| e.without_url())?;
-    Ok(data)
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.without_url())? {
+        anyhow::ensure!(
+            body.len() + chunk.len() <= crate::utils::MAX_CATALOG_BYTES,
+            "Provider response is too large"
+        );
+        body.extend_from_slice(&chunk);
+    }
+    Ok(serde_json::from_slice(&body)?)
 }
 
 fn convert_xtream_live_to_channel(

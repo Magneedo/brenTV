@@ -229,7 +229,12 @@ pub async fn get_m3u8_from_link(mut source: Source, wipe: bool) -> Result<Refres
             .and_then(|r| r.error_for_status())
             .map_err(|e| e.without_url())?;
         let mut file = File::create(get_tmp_path(source.id.context("no source id")?)?)?;
+        let mut size = 0;
         while let Some(chunk) = response.chunk().await.map_err(|e| e.without_url())? {
+            size += chunk.len();
+            if size > utils::MAX_CATALOG_BYTES {
+                bail!("Playlist is too large");
+            }
             file.write_all(&chunk)?;
         }
         Ok(())

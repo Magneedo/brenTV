@@ -6,6 +6,8 @@ use std::time::Instant;
 
 const DEFAULT_USER_AGENT: &str = "brenTV";
 pub static TEMP_PATH: OnceLock<String> = OnceLock::new();
+// Largest playlist or provider reply a refresh will download.
+pub const MAX_CATALOG_BYTES: usize = 512 << 20;
 
 /// Imports (`wipe` false: new source) or refreshes a source. The importers
 /// return stats (with `error` set and the previous data kept when the import
