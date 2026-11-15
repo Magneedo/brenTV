@@ -1,0 +1,20 @@
+Privacy Policy
+
+brenTV stores the provider addresses and credentials you enter, app settings,
+favorites, viewing history, playback positions, and recording/download jobs
+locally on your device. Recordings and downloaded media are saved in the
+configured folders. Diagnostic logs and temporary files are stored locally.
+
+Importing a catalog, watching or recording a stream, downloading media, and
+loading program listings contact the providers or XMLTV addresses you configure.
+Those requests may include the provider credentials and playback headers needed
+for access. Those services have their own privacy policies.
+
+brenTV has no app-operated account service or analytics backend and does not
+upload your local library or viewing history to an app-operated service.
+Opening an external link, such as Report issue, uses your browser and contacts
+that website.
+
+You can remove sources and manage saved media in the app. Uninstalling the app
+may leave its local database, logs, and saved media on the device; remove those
+files separately if you want to erase them.

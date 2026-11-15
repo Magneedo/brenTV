@@ -1,0 +1,703 @@
+// Raw key data distinguishes Android soft-keyboard events from D-pad input.
+// ignore_for_file: deprecated_member_use
+
+import 'package:brentv/categories_view.dart';
+import 'package:brentv/refresh_stats.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:animations/animations.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_form_builder/flutter_form_builder.dart';
+import 'package:form_builder_validators/form_builder_validators.dart';
+import 'package:loader_overlay/loader_overlay.dart';
+import 'package:brentv/correction_modal.dart';
+import 'package:brentv/home.dart';
+import 'package:brentv/models/filters.dart';
+import 'package:brentv/models/home_manager.dart';
+import 'package:brentv/models/source.dart';
+import 'package:brentv/models/source_type.dart';
+import 'package:brentv/models/steps.dart';
+import 'package:brentv/models/view_type.dart';
+import 'package:brentv/error.dart';
+import 'package:brentv/native_bridge.dart';
+import 'package:brentv/tv_home.dart';
+import 'package:brentv/theme.dart';
+
+class Setup extends StatefulWidget {
+  final bool showAppBar;
+  final bool tvMode;
+  const Setup({super.key, this.showAppBar = false, this.tvMode = false});
+
+  @override
+  State<Setup> createState() => _SetupState();
+}
+
+class _SetupState extends State<Setup> {
+  Steps step = Steps.welcome;
+  SourceType selectedSourceType = SourceType.xtream;
+  bool isForward = true;
+  bool formValid = false;
+  bool loading = false;
+  final Map<Steps, FocusNode> focusNodes = {
+    Steps.name: FocusNode(),
+    Steps.url: FocusNode(),
+    Steps.username: FocusNode(),
+    Steps.password: FocusNode(),
+  };
+  final formPages = {Steps.name, Steps.url, Steps.username, Steps.password};
+  final _formKeys = {
+    Steps.name: GlobalKey<FormBuilderState>(),
+    Steps.url: GlobalKey<FormBuilderState>(),
+    Steps.username: GlobalKey<FormBuilderState>(),
+    Steps.password: GlobalKey<FormBuilderState>(),
+  };
+  final formValues = {
+    Steps.name: "",
+    Steps.url: "",
+    Steps.username: "",
+    Steps.password: "",
+  };
+  final nextButtonFocusNode = FocusNode();
+  Set<String> existingSourceNames = {};
+
+  static const int _androidFlagSoftKeyboard = 0x2;
+
+  bool _isFromSoftKeyboard(RawKeyEvent event) {
+    final data = event.data;
+    return data is RawKeyEventDataAndroid &&
+        (data.flags & _androidFlagSoftKeyboard) != 0;
+  }
+
+  KeyEventResult _handleFormRawKey(FocusNode node, RawKeyEvent event) {
+    if (_isFromSoftKeyboard(event)) {
+      return KeyEventResult.ignored;
+    }
+    if (event is RawKeyDownEvent) {
+      final key = event.logicalKey;
+      if (key == LogicalKeyboardKey.escape ||
+          key == LogicalKeyboardKey.goBack) {
+        bool moved = FocusScope.of(
+          context,
+        ).focusInDirection(TraversalDirection.left);
+        if (!moved) {
+          node.unfocus();
+        }
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowDown) {
+        bool moved = FocusScope.of(
+          context,
+        ).focusInDirection(TraversalDirection.down);
+        if (moved) {
+          return KeyEventResult.handled;
+        }
+      }
+      if (key == LogicalKeyboardKey.arrowRight) {
+        bool moved = FocusScope.of(
+          context,
+        ).focusInDirection(TraversalDirection.right);
+        if (moved) {
+          return KeyEventResult.handled;
+        }
+      }
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        bool moved = FocusScope.of(
+          context,
+        ).focusInDirection(TraversalDirection.left);
+        if (moved) {
+          return KeyEventResult.handled;
+        }
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  Future<void> finish() async {
+    if (loading) return;
+    loading = true;
+    var live = true, movies = true, series = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Import media'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                title: const Text('Live'),
+                value: live,
+                onChanged: (v) => update(() => live = v),
+              ),
+              SwitchListTile(
+                title: const Text('Movies'),
+                value: movies,
+                onChanged: (v) => update(() => movies = v),
+              ),
+              SwitchListTile(
+                title: const Text('Series'),
+                value: series,
+                onChanged: (v) => update(() => series = v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: live || movies || series
+                  ? () => Navigator.pop(context, true)
+                  : null,
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      loading = false;
+      return;
+    }
+    Source? saved;
+    bool imported = false;
+    final result = await Error.tryAsyncNoLoading(() async {
+      try {
+        final source = Source(
+          name: formValues[Steps.name]!,
+          sourceType: selectedSourceType,
+          url: selectedSourceType == SourceType.m3u
+              ? formValues[Steps.url]!
+              : await fixUrl(formValues[Steps.url]!),
+          username: selectedSourceType == SourceType.xtream
+              ? formValues[Steps.username]
+              : null,
+          password: selectedSourceType == SourceType.xtream
+              ? formValues[Steps.password]
+              : null,
+          importLive: live,
+          importMovies: movies,
+          importSeries: series,
+        );
+        if (!mounted) return false;
+        saved = await NativeBridge.instance.saveSource(source);
+        while (mounted) {
+          if (!mounted) return false;
+          final action = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Source saved'),
+              content: Text(
+                selectedSourceType == SourceType.xtream
+                    ? 'Choose categories before importing, or import now.'
+                    : 'Enter exact category names to filter the first import. Discovered categories are listed after importing.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, 'categories'),
+                  child: const Text('Choose categories…'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, 'import'),
+                  child: const Text('Import'),
+                ),
+              ],
+            ),
+          );
+          if (action == null) return false;
+          if (action == 'categories') {
+            if (!mounted) return false;
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CategoriesView(
+                  source: saved!,
+                  offerRefreshAfterSave: false,
+                ),
+              ),
+            );
+            continue;
+          }
+          if (!mounted) return false;
+          final processed = await Error.tryAsync(
+            () => NativeBridge.instance.processSource(saved!),
+            context,
+            null,
+            true,
+            false,
+          );
+          if (!processed.success || processed.data == null) return false;
+          if (!processed.data!.success) {
+            if (mounted) await showRefreshStats(context, [processed.data!]);
+            return false;
+          }
+          imported = true;
+          if (mounted) await showRefreshStats(context, [processed.data!]);
+          return true;
+        }
+        return false;
+      } finally {
+        if (saved != null && !imported) {
+          await NativeBridge.instance.deleteSource(saved!.id!);
+        }
+      }
+    }, context);
+    loading = false;
+    if (mounted && result.success && imported) {
+      setState(() => step = Steps.finish);
+    }
+  }
+
+  Future<String> fixUrl(String url) async {
+    var uri = Uri.parse(url);
+    if (uri.scheme.isEmpty) {
+      uri = Uri.parse("http://$uri");
+    }
+    if (uri.path == "/" || uri.path.isEmpty) {
+      if (await showXtreamCorrectionModal()) {
+        uri = uri.resolve("player_api.php");
+      }
+    }
+    return uri.toString();
+  }
+
+  Future showXtreamCorrectionModal() async {
+    return await showDialog(
+      context: context,
+      builder: (context) => const CorrectionModal(),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    nextButtonFocusNode.requestFocus();
+    for (var node in focusNodes.values) {
+      node.onKey = _handleFormRawKey;
+    }
+  }
+
+  @override
+  void dispose() {
+    for (var focus in focusNodes.values) {
+      focus.dispose();
+    }
+    nextButtonFocusNode.dispose();
+    super.dispose();
+  }
+
+  Future<bool> selectFile() async {
+    var path = (await FilePicker.platform.pickFiles())?.files.single.path;
+    if (path == null) return false;
+    formValues[Steps.url] = path;
+    return true;
+  }
+
+  void prevStep() {
+    if (loading) return;
+    isForward = false;
+    if (formPages.contains(step)) {
+      formValues[step] =
+          _formKeys[step]?.currentState?.fields[step.name]?.value;
+    }
+    setState(() {
+      step = Steps.values[step.index - 1];
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() {
+        formValid = _formKeys[step]?.currentState?.isValid == true;
+      });
+      if (formPages.contains(step)) focusNodes[step]?.requestFocus();
+      if (step == Steps.welcome) {
+        nextButtonFocusNode.requestFocus();
+      }
+    });
+  }
+
+  Future<void> handleNext() async {
+    if (loading) return;
+    isForward = true;
+    if (formPages.contains(step)) {
+      formValues[step] =
+          _formKeys[step]?.currentState?.fields[step.name]?.value;
+    }
+    if (step == Steps.name) {
+      var sourceName = formValues[step]!;
+      if (await NativeBridge.instance.sourceNameExists(sourceName)) {
+        existingSourceNames.add(sourceName);
+        _formKeys[step]?.currentState?.validate();
+        return;
+      }
+    }
+    if (step == Steps.name && selectedSourceType == SourceType.m3u) {
+      if (!await selectFile()) return;
+      finish();
+    } else if ((selectedSourceType == SourceType.m3uUrl && step == Steps.url) ||
+        step == Steps.password) {
+      finish();
+    } else if (step == Steps.finish) {
+      navigateToHome();
+    } else {
+      setState(() {
+        step = Steps.values[step.index + 1];
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() {
+          if (formValues[step]?.isNotEmpty == true) {
+            _formKeys[step]?.currentState?.validate();
+          }
+          formValid = _formKeys[step]?.currentState?.isValid == true;
+        });
+        if (formPages.contains(step)) focusNodes[step]?.requestFocus();
+      });
+    }
+  }
+
+  void navigateToHome() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (_) => widget.tvMode
+            ? const TvHome()
+            : Home(
+                home: HomeManager(filters: Filters(viewType: ViewType.all)),
+              ),
+      ),
+      (route) => false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: step == Steps.welcome,
+      onPopInvokedWithResult: (didPop, result) {
+        if (step == Steps.finish || loading) return;
+        if (!didPop) prevStep();
+      },
+      child: Scaffold(
+        appBar: widget.showAppBar ? AppBar() : null,
+        body: SafeArea(
+          child: LoaderOverlay(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24.0,
+                    vertical: 16,
+                  ),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(
+                      begin: 0,
+                      end: (step.index + 1) / Steps.values.length,
+                    ),
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeInOut,
+                    builder: (context, value, child) {
+                      return ClipRRect(
+                        borderRadius: cornerRadius(context, 4),
+                        child: LinearProgressIndicator(
+                          value: value,
+                          minHeight: 6,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Expanded(
+                  child: PageTransitionSwitcher(
+                    duration: const Duration(milliseconds: 400),
+                    reverse: !isForward,
+                    transitionBuilder:
+                        (child, primaryAnimation, secondaryAnimation) {
+                          return SharedAxisTransition(
+                            animation: primaryAnimation,
+                            secondaryAnimation: secondaryAnimation,
+                            transitionType: SharedAxisTransitionType.horizontal,
+                            child: child,
+                          );
+                        },
+                    child: currentPage,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: FocusTraversalGroup(
+                    policy: OrderedTraversalPolicy(),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        AnimatedOpacity(
+                          opacity: step != Steps.welcome && step != Steps.finish
+                              ? 1
+                              : 0,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          child: IgnorePointer(
+                            ignoring:
+                                step == Steps.welcome || step == Steps.finish,
+                            child: FocusTraversalOrder(
+                              order: const NumericFocusOrder(2.0),
+                              child: FilledButton.tonal(
+                                onPressed: prevStep,
+                                style: FilledButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 16,
+                                  ),
+                                ),
+                                child: const Text(
+                                  "Back",
+                                  style: TextStyle(fontSize: 18),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        FocusTraversalOrder(
+                          order: const NumericFocusOrder(1.0),
+                          child: FilledButton(
+                            focusNode: nextButtonFocusNode,
+                            onPressed: !formPages.contains(step) || formValid
+                                ? handleNext
+                                : null,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 16,
+                              ),
+                            ),
+                            child: Text(
+                              step == Steps.name &&
+                                      selectedSourceType == SourceType.m3u
+                                  ? "Select file"
+                                  : step == Steps.finish
+                                  ? "Finish"
+                                  : "Next",
+                              style: const TextStyle(fontSize: 18),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget get currentPage {
+    switch (step) {
+      case Steps.welcome:
+        return getPage(
+          "Welcome to brenTV",
+          "Let's set up your ${widget.showAppBar ? "new" : "first"} source",
+          null,
+        );
+      case Steps.sourceType:
+        return getPage(
+          "What is your provider type?",
+          null,
+          List.generate(SourceType.values.length, (i) {
+            final isLast = i == SourceType.values.length - 1;
+            final card = Card(
+              color: selectedSourceType.index == i
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : Theme.of(context).cardTheme.color,
+              child: ListTile(
+                title: Text((SourceType.values[i]).label),
+                onTap: () {
+                  setState(() {
+                    formValues[Steps.url] = "";
+                    selectedSourceType = SourceType.values[i];
+                  });
+                },
+              ),
+            );
+            if (isLast) {
+              return Focus(
+                canRequestFocus: false,
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                    nextButtonFocusNode.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: card,
+              );
+            }
+            return card;
+          }),
+        );
+      case Steps.name:
+        return getPage("What should we name this source?", null, [
+          FormBuilder(
+            onChanged: () {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                setState(() {
+                  formValid =
+                      _formKeys[Steps.name]!.currentState?.isValid == true;
+                });
+              });
+            },
+            initialValue: {Steps.name.name: formValues[Steps.name]},
+            key: _formKeys[Steps.name],
+            child: FormBuilderTextField(
+              autocorrect: false,
+              focusNode: focusNodes[Steps.name],
+              decoration: const InputDecoration(
+                labelText: "Name",
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.label_outline),
+              ),
+              textInputAction: TextInputAction.next,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              validator: FormBuilderValidators.compose([
+                FormBuilderValidators.required(),
+                (value) {
+                  var trimmed = value?.trim();
+                  if (trimmed == null || trimmed.isEmpty) {
+                    return null;
+                  }
+                  if (existingSourceNames.contains(trimmed)) {
+                    return "Name already exists";
+                  }
+                  return null;
+                },
+              ]),
+              name: 'name',
+            ),
+          ),
+        ]);
+      case Steps.url:
+        return getPage("What is your provider's URL?", null, [
+          FormBuilder(
+            onChanged: () {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                setState(() {
+                  formValid =
+                      _formKeys[Steps.url]!.currentState?.isValid == true;
+                });
+              });
+            },
+            initialValue: {Steps.url.name: formValues[Steps.url]},
+            key: _formKeys[Steps.url],
+            child: FormBuilderTextField(
+              autocorrect: false,
+              focusNode: focusNodes[Steps.url],
+              decoration: const InputDecoration(
+                labelText: "URL",
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.link),
+              ),
+              textInputAction: TextInputAction.next,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              validator: FormBuilderValidators.required(),
+              name: 'url',
+            ),
+          ),
+        ]);
+      case Steps.username:
+        return getPage("What is your username?", null, [
+          FormBuilder(
+            onChanged: () {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                setState(() {
+                  formValid =
+                      _formKeys[Steps.username]!.currentState?.isValid == true;
+                });
+              });
+            },
+            initialValue: {Steps.username.name: formValues[Steps.username]},
+            key: _formKeys[Steps.username],
+            child: FormBuilderTextField(
+              autocorrect: false,
+              focusNode: focusNodes[Steps.username],
+              decoration: const InputDecoration(
+                labelText: "Username",
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.person),
+              ),
+              textInputAction: TextInputAction.next,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              validator: FormBuilderValidators.required(),
+              name: 'username',
+            ),
+          ),
+        ]);
+      case Steps.password:
+        return getPage("What is your password?", null, [
+          FormBuilder(
+            initialValue: {Steps.password.name: formValues[Steps.password]},
+            onChanged: () {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                setState(() {
+                  formValid =
+                      _formKeys[Steps.password]!.currentState?.isValid == true;
+                });
+              });
+            },
+            key: _formKeys[Steps.password],
+            child: FormBuilderTextField(
+              autocorrect: false,
+              focusNode: focusNodes[Steps.password],
+              decoration: const InputDecoration(
+                labelText: "Password",
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.password),
+              ),
+              textInputAction: TextInputAction.next,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              validator: FormBuilderValidators.required(),
+              name: 'password',
+            ),
+          ),
+        ]);
+      case Steps.finish:
+        return getPage("Done!", "You're all set 🎉", null);
+    }
+  }
+
+  Widget getPage(
+    final String title,
+    final String? subtitle,
+    final List<Widget>? content,
+  ) {
+    return Center(
+      key: ValueKey(title),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 20),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            if (content != null) ...[const SizedBox(height: 24), ...content],
+          ],
+        ),
+      ),
+    );
+  }
+}

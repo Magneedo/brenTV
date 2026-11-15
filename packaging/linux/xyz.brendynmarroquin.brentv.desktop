@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=brenTV
+Comment=IPTV player
+Exec=brentv
+Icon=xyz.brendynmarroquin.brentv
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupWMClass=xyz.brendynmarroquin.brentv

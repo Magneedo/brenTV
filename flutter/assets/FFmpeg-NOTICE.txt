@@ -1,0 +1,12 @@
+brenTV iPhone MP4 conversion uses the minimal FFmpegKit / FFmpeg 8.1.2 libraries.
+Copyright FFmpeg and FFmpegKit contributors. Licensed under LGPL version 3.
+GNU GPL version 3 and LGPL version 3 texts accompany this notice.
+
+Native release, source repository and build scripts:
+https://github.com/sk3llo/ffmpeg_kit_flutter
+https://github.com/sk3llo/ffmpeg_kit_flutter/releases/tag/8.1.2-min
+FFmpeg source: https://ffmpeg.org/download.html
+
+Native archive: ffmpeg-kit-ios-min-8.1.2.zip
+SHA256: de338cc8b98f32c6e8e35a60c913247f3f60fbc38634edcf7923259240803b9d
+Only local-file conversion uses these libraries. Playback uses Apple's AVKit.

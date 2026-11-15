@@ -1,0 +1,39 @@
+import 'package:flutter/material.dart';
+import 'package:brentv/models/id_data.dart';
+
+class SelectDialog extends StatelessWidget {
+  const SelectDialog({
+    super.key,
+    required this.action,
+    required this.data,
+    required this.title,
+  });
+  final Function(int id) action;
+  final List<IdData<String>> data;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(title),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: data
+              .asMap()
+              .entries
+              .map((entry) => getItem(entry.value, entry.key == 0))
+              .toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget getItem(IdData<String> item, bool autofocus) {
+    return ListTile(
+      autofocus: autofocus,
+      title: Text(item.data),
+      onTap: () => action(item.id),
+    );
+  }
+}

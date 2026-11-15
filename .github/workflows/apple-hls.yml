@@ -1,0 +1,19 @@
+name: Apple HLS check
+# Plays the iPhone live repackager's output format in AVPlayer on macOS.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - flutter/lib/playback/ios/live_relay.dart
+      - scripts/apple-hls/**
+      - .github/workflows/apple-hls.yml
+permissions:
+  contents: read
+jobs:
+  avplayer:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install ffmpeg
+      - run: scripts/apple-hls/run.sh

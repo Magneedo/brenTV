@@ -1,0 +1,377 @@
+syntax = "proto3";
+package generated_proto;
+
+message Channel {
+  optional int64 id = 1;
+  string name = 2;
+  optional string url = 3;
+  optional string group = 4;
+  optional string image = 5;
+  uint32 media_type = 6;
+  optional int64 source_id = 7;
+  optional uint64 series_id = 8;
+  optional int64 group_id = 9;
+  bool favorite = 10;
+  optional uint64 stream_id = 11;
+  optional bool tv_archive = 12;
+  optional int64 season_id = 13;
+  optional int64 episode_num = 14;
+  uint32 quality = 15;           // parsed from the name: 0 unknown, 1 SD, 2 HD, 3 FHD, 4 UHD
+  optional ChannelHttpHeaders playback_headers = 20;
+  bool hidden = 17;
+  optional uint32 archive_days = 18;
+  optional string epg_id = 19;
+  optional string alt_key = 16;  // alternate-feed group (live channels only)
+}
+
+message SetHidden { int64 id = 1; bool hidden = 2; bool group = 3; }
+message SwapFavorites { int64 id = 1; int64 other = 2; bool group = 3; }
+message GuideRequest { int64 channel_id = 1; int64 from = 2; int64 to = 3; }
+message ProgrammeList { bool supported = 1; repeated Programme programmes = 2; bool catchup_supported = 3; uint32 archive_days = 4; }
+
+message ChannelList {
+  repeated Channel channels = 1;
+  optional int64 preferred_channel_id = 2;
+}
+
+message Source {
+  optional int64 id = 1;
+  string name = 2;
+  optional string url = 3;
+  optional string url_origin = 4;
+  optional string username = 5;
+  optional string password = 6;
+  uint32 source_type = 7;         
+  bool enabled = 9;
+  optional string user_agent = 10;
+  optional string stream_user_agent = 12;
+  optional int64 last_updated = 13;
+  // Selective import; unset means true.
+  optional bool import_live = 14;
+  optional bool import_movies = 15;
+  optional bool import_series = 16;
+  optional string epg_url = 18;
+  optional RefreshStats last_refresh_stats = 17;
+}
+
+message Settings {
+  optional bool use_stream_caching = 1;
+  optional uint32 default_view = 2;
+  optional bool refresh_on_start = 3;
+  optional uint32 default_sort = 4;
+  optional bool force_tv_mode = 5;
+  optional bool show_livestreams = 6;
+  optional bool show_movies = 7;
+  optional bool show_series = 8;
+  optional bool enable_catchup = 24;
+  optional bool enable_full_guide = 25;
+  optional bool enable_xmltv = 26;
+  optional bool keyboard_shortcuts = 27;
+  optional bool guide_player_titles = 28;
+  optional bool guide_tile_text = 29;
+  optional bool auto_quality_discovery = 30;
+  optional uint32 search_delay_ms = 31;
+  reserved 9;                           // was show_thumbnails; the app shows no artwork
+  optional uint32 linux_player = 10;    // 0 external mpv (default), 1 built-in (media_kit)
+  optional string mpv_path = 11;        // default "mpv"
+  optional string hwdec = 12;           // mpv --hwdec; default "auto-safe", "" leaves it to mpv.conf
+  optional uint32 cache_secs = 13;      // mpv --cache-secs (and readahead)
+  optional uint32 demuxer_max_mb = 14;  // mpv --demuxer-max-bytes in MiB
+  optional string mpv_extra_args = 15;  // extra mpv arguments, split on whitespace
+  optional bool mpv_reuse_window = 16;  // keep one mpv running and switch with loadfile
+  optional bool ios_native_player = 17; // AVPlayer when the stream allows it
+  optional bool ios_prefer_hls = 18;    // ask Xtream for .m3u8 instead of .ts on iOS
+  optional bool background_audio = 19;  // keep audio playing in the background (iOS)
+  optional bool auto_pip = 20;          // start Picture-in-Picture when leaving the app (iOS)
+  optional int64 start_group_id = 21;   // start page is this category (with default_view CATEGORIES)
+  optional string start_group_name = 22;
+  optional bool show_programmes = 23;    // Xtream now/next text; unset means true
+  optional bool number_key_switching = 32; // opt-in mpv channel positions, default false
+  optional uint32 ui_scale_percent = 33;   // whole-app zoom, default 100
+  optional string media_preferences = 36; // folders, padding, concurrency and dismissed tips
+  optional string download_jobs = 38; // resumable jobs without provider credentials
+  optional string recording_jobs = 37; // schedules without provider credentials
+  optional string bottom_bar = 35; // ordered JSON [{page, visible}], stable page names
+  optional bool square_corners = 34;      // unset means rounded
+}
+
+enum MediaType {
+  MEDIA_TYPE_LIVESTREAM = 0;
+  MEDIA_TYPE_MOVIE = 1;
+  MEDIA_TYPE_SERIE = 2;
+  MEDIA_TYPE_GROUP = 3;
+  MEDIA_TYPE_SEASON = 4;
+}
+
+enum ViewType {
+  VIEW_TYPE_ALL = 0;
+  VIEW_TYPE_CATEGORIES = 1;
+  VIEW_TYPE_FAVORITES = 2;
+  VIEW_TYPE_HISTORY = 3;
+  VIEW_TYPE_SETTINGS = 4;
+  VIEW_TYPE_LOCAL_MEDIA = 5;
+  VIEW_TYPE_RECORDINGS = 6;
+  VIEW_TYPE_DOWNLOADS = 7;
+}
+
+message Filters {
+  optional string query = 1;
+  repeated int64 source_ids = 2;
+  repeated MediaType media_types = 3; 
+  ViewType view_type = 4;
+  uint32 page = 5;
+  optional int64 series_id = 6;
+  optional int64 group_id = 7;
+  bool use_keywords = 8;
+  uint32 sort = 9;
+  optional int64 season = 10;
+  bool hidden_only = 12;
+  bool include_hidden = 13;
+  bool favorite_groups = 11;  // list the favourite categories instead
+}
+
+message ToggleFavorite {
+  int64 channel_id = 1;
+  bool favorite = 2;
+}
+
+message IdMessage {
+  int64 value = 1;
+}
+
+message MoviePosition {
+  int64 channel_id = 1;
+  int64 position = 2;
+}
+
+message StrMessage {
+  string value = 1;
+}
+
+message OptStrMessage {
+  optional string value = 1;
+}
+
+message BoolMessage {
+  bool value = 1;
+}
+
+message GetMoviePosition {
+  optional int64 position = 1; 
+}
+
+message InitMessage {
+  string db_path = 1;
+  string temp_path = 2;
+}
+
+message GetEpisodes {
+  int64 series_id = 1;
+  int64 source_id = 2;
+  optional string fallback_image = 3;
+}
+
+message ChannelHttpHeaders {
+  optional int64 id = 1;
+  optional int64 channel_id = 2;
+  optional string referrer = 3;
+  optional string user_agent = 4;
+  optional string http_origin = 5;
+  optional bool ignore_ssl = 6;
+}
+
+message GetEnabledSourcesMinimal {
+  repeated int64 list_id = 1;
+}
+
+message SourceList {
+  repeated Source sources = 1;
+}
+
+message SetSourceEnabled {
+  int64 source_id = 1;
+  bool enabled = 2;
+}
+
+// Category filters (per source and media type)
+enum CategoryMode {
+  CATEGORY_MODE_EXCLUDE = 0;  // listed categories are skipped
+  CATEGORY_MODE_INCLUDE = 1;  // only listed categories are imported
+}
+
+message Category {
+  int64 id = 1;
+  uint32 media_type = 2;
+  string name = 3;
+  bool listed = 4;                  // in the list; meaning depends on the mode
+  optional uint32 stream_count = 5; // streams seen at the last refresh
+}
+
+message CategoryList {
+  repeated Category categories = 1;
+  CategoryMode live_mode = 2;
+  CategoryMode movies_mode = 3;
+  CategoryMode series_mode = 4;
+}
+
+message SetCategories {
+  int64 source_id = 1;
+  uint32 media_type = 2;
+  CategoryMode mode = 3;
+  repeated string listed = 4;       // category names
+}
+
+// Refresh statistics
+message MediaTypeStats {
+  uint32 media_type = 1;
+  bool enabled = 2;                 // false: import switched off, nothing fetched
+  bool failed = 3;                  // fetch or parse failed; previous rows were kept
+  optional string error = 4;
+  uint32 fetched = 5;               // streams received from the provider
+  uint32 imported = 6;              // rows written
+  uint32 excluded = 7;              // skipped by category rules
+  uint32 categories = 8;            // categories known
+  uint32 categories_excluded = 9;   // categories not imported
+}
+
+message RefreshStats {
+  int64 source_id = 1;
+  string source_name = 2;
+  repeated MediaTypeStats types = 3;
+  uint64 duration_ms = 4;
+  int64 finished_at = 5;            // unix seconds
+  bool success = 6;
+  optional string error = 7;
+}
+
+message RefreshStatsList {
+  repeated RefreshStats stats = 1;
+}
+
+// Alternate feeds
+enum AltOverrideKind {
+  ALT_OVERRIDE_UNLINK = 0;          // channel leaves its group
+  ALT_OVERRIDE_LINK = 1;            // channel joins the target channel's group
+  ALT_OVERRIDE_PREFERRED = 2;       // channel is the preferred feed of its group
+}
+
+message AltOverride {
+  int64 channel_id = 1;
+  AltOverrideKind kind = 2;
+  optional int64 target_channel_id = 3;
+}
+
+// HLS variants
+message StreamVariant {
+  string url = 1;                   // absolute
+  uint64 bandwidth = 2;             // bits per second
+  optional uint64 average_bandwidth = 3;
+  optional uint32 width = 4;
+  optional uint32 height = 5;
+  optional double frame_rate = 6;
+  optional string codecs = 7;
+  optional string name = 8;
+}
+
+message StreamVariantsRequest {
+  int64 channel_id = 1;
+  string url = 2;
+}
+
+message StreamVariantList {
+  repeated StreamVariant variants = 1; // empty: not a multi-variant HLS stream
+  string master_url = 2;               // final URL after redirects
+}
+
+message Programme {
+  string title = 1;
+  int64 start = 2;
+  int64 stop = 3;
+  bool catchup_available = 4;
+}
+
+message NowNext {
+  bool supported = 1;
+  Programme now = 2;
+  Programme next = 3;
+}
+
+message TransferInfo { Channel channel = 1; uint32 max_connections = 2; string identity = 3; string show_name = 4; uint32 season = 5; uint32 episode = 6; }
+
+// A ranged transfer into `part_path`; `total`, `etag` and `last_modified` are
+// what an earlier attempt saved, and validate the partial file on resume.
+message DownloadRequest {
+  string id = 1;
+  string url = 2;
+  string part_path = 3;
+  optional string user_agent = 4;
+  optional string referrer = 5;
+  optional string http_origin = 6;
+  bool ignore_ssl = 7;
+  optional string etag = 8;
+  optional string last_modified = 9;
+  int64 total = 10;
+  int64 reserved_bytes = 11; // space other running downloads still need
+}
+
+message DownloadStatus {
+  int64 bytes = 1;
+  int64 total = 2;
+  optional string etag = 3;
+  optional string last_modified = 4;
+  bool finished = 5;           // every byte is in the partial file
+  bool stopped = 6;            // stop_download ended it
+  optional string failure = 7; // a message to show; retrying will not help
+  bool active = 8;             // download_progress: the transfer is running
+}
+
+// A live stream to inspect and, if needed, relay to a local repackager.
+message RelayRequest {
+  string url = 1;
+  optional string user_agent = 2;
+  optional string referrer = 3;
+  optional string http_origin = 4;
+  bool ignore_ssl = 5;
+  string directory = 6; // absolute folder for the repackaged output
+  // A file rather than a live stream: nothing is fetched until a reader
+  // asks, and each request's Range goes to the provider (input.<anything>).
+  bool seekable = 7;
+}
+
+// `video`/`audio` are FFmpeg codec names from the stream's program map,
+// empty when absent or when the stream is not MPEG-TS. Files in the request's
+// folder are served at http://127.0.0.1:<port>/<token>/<name>; the provider's
+// bytes at .../input.ts.
+message RelayInfo {
+  string token = 1;
+  uint32 port = 2;
+  string video = 3;
+  string audio = 4;
+}
+
+message FFIResult {
+  bool success = 1;
+  optional string error_message = 2;
+  oneof data {
+    Settings settings = 3;
+    Source source = 4;
+    ChannelList channel_list = 6;
+    BoolMessage bool_message = 7;
+    GetMoviePosition movie_position = 8;
+    ChannelHttpHeaders headers = 9;
+    GetEnabledSourcesMinimal enabled_sources_minimal = 10;
+    SourceList source_list = 11;
+    CategoryList category_list = 12;
+    RefreshStats refresh_stats = 13;
+    RefreshStatsList refresh_stats_list = 14;
+    StreamVariantList stream_variants = 15;
+    NowNext now_next = 16;
+    ProgrammeList programme_list = 17;
+    TransferInfo transfer_info = 18;
+    IdMessage disk_space = 19;
+    DownloadStatus download_status = 20;
+    RelayInfo relay_info = 21;
+  }
+}
+
+

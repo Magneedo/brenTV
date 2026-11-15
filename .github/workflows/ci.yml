@@ -1,0 +1,56 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+  flutter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          cache: true
+      # The MP4 converter tests run the real ffmpeg and ffprobe.
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: flutter pub get --enforce-lockfile
+      - run: flutter analyze
+      - run: flutter test
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@v2
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev mpv sqlite3 ffmpeg
+      - run: cd flutter && flutter pub get --enforce-lockfile
+      - run: scripts/package-linux.sh
+      - name: Native integration and DVR regression tests
+        run: |
+          runtime=$(mktemp -d)
+          trap 'rm -rf "$runtime"' EXIT
+          cd flutter
+          XDG_RUNTIME_DIR="$runtime" BRENTV_NATIVE_TESTS=1 BRENTV_RECORDING_TESTS=1 LD_LIBRARY_PATH="$PWD/build/linux/x64/release/bundle/lib" flutter test --no-pub --concurrency=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brentv-linux-x86_64
+          path: dist/brentv-*-linux-x86_64.tar.gz

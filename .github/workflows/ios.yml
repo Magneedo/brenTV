@@ -1,0 +1,148 @@
+name: iOS
+on:
+  push:
+    tags: ['*']
+  workflow_dispatch:
+    inputs:
+      method:
+        description: Signing export method (must match the provisioning profile)
+        type: choice
+        options: [development, ad-hoc]
+        default: development
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      SIGNING: ${{ secrets.IOS_P12_BASE64 != '' && secrets.IOS_P12_PASSWORD != '' && secrets.IOS_PROFILE_BASE64 != '' && secrets.IOS_TEAM_ID != '' }}
+      EXPORT_METHOD: ${{ inputs.method || 'development' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          targets: aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - name: Build Rust static library
+        run: scripts/build-ios-rust.sh
+      - name: Resolve Flutter dependencies
+        working-directory: flutter
+        run: flutter pub get --enforce-lockfile
+      - name: Build unsigned device app
+        if: env.SIGNING != 'true'
+        working-directory: flutter
+        run: flutter build ios --release --no-codesign --no-pub
+      - name: Verify exported Rust FFI symbols and package IPA
+        if: env.SIGNING != 'true'
+        run: |
+          set -euo pipefail
+          app=flutter/build/ios/iphoneos/Runner.app
+          nm -gU "$app/Runner" > "$RUNNER_TEMP/ffi-symbols.txt"
+          for symbol in initialize get_channels save_source get_stream_variants get_now_next get_schedule get_catchup set_hidden restore_all_hidden favorite_group swap_favorites get_transfer_info get_disk_space download_file download_progress stop_download relay_open relay_close; do
+            if ! grep -Eq " _${symbol}$" "$RUNNER_TEMP/ffi-symbols.txt"; then
+              echo "::error::Missing Rust FFI symbol: $symbol"
+              exit 1
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/unsigned/Payload"
+          cp -R "$app" "$RUNNER_TEMP/unsigned/Payload/"
+          cd "$RUNNER_TEMP/unsigned"
+          zip -qry "$GITHUB_WORKSPACE/brentv-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        if: env.SIGNING != 'true'
+        with:
+          name: brentv-unsigned
+          path: brentv-unsigned.ipa
+          if-no-files-found: error
+      - name: Install signing material
+        if: env.SIGNING == 'true'
+        env:
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, os, pathlib, plistlib, secrets, subprocess
+          root = pathlib.Path(os.environ['RUNNER_TEMP'])
+          keychain = str(root / 'brentv-signing.keychain-db')
+          password = secrets.token_urlsafe(32)
+          cert = root / 'signing.p12'
+          profile = root / 'signing.mobileprovision'
+          cert.write_bytes(base64.b64decode(os.environ['IOS_P12_BASE64']))
+          profile.write_bytes(base64.b64decode(os.environ['IOS_PROFILE_BASE64']))
+          def run(*args):
+              process = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if process.returncode:
+                  raise RuntimeError('Signing setup command failed; output withheld to protect signing material')
+              return process.stdout
+          run('security', 'create-keychain', '-p', password, keychain)
+          run('security', 'set-keychain-settings', '-lut', '21600', keychain)
+          run('security', 'unlock-keychain', '-p', password, keychain)
+          run('security', 'import', str(cert), '-P', os.environ['IOS_P12_PASSWORD'], '-A', '-t', 'cert', '-f', 'pkcs12', '-k', keychain)
+          run('security', 'set-key-partition-list', '-S', 'apple-tool:,apple:', '-k', password, keychain)
+          run('security', 'list-keychains', '-d', 'user', '-s', keychain, str(pathlib.Path.home() / 'Library/Keychains/login.keychain-db'))
+          data = plistlib.loads(run('security', 'cms', '-D', '-i', str(profile)))
+          team = os.environ['IOS_TEAM_ID']
+          bundle = 'xyz.brendynmarroquin.brentv'
+          assert team in data['TeamIdentifier'], 'Profile team mismatch'
+          appid = data['Entitlements']['application-identifier']
+          assert appid in (team + '.' + bundle, team + '.*'), 'Profile bundle mismatch'
+          profiles = pathlib.Path.home() / 'Library/MobileDevice/Provisioning Profiles'
+          profiles.mkdir(parents=True, exist_ok=True)
+          installed = profiles / (data['UUID'] + '.mobileprovision')
+          installed.write_bytes(profile.read_bytes())
+          (root / 'installed-profile-path').write_text(str(installed))
+          options = {'method': os.environ['EXPORT_METHOD'], 'teamID': team,
+                     'signingStyle': 'manual', 'provisioningProfiles': {bundle: data['UUID']}}
+          (root / 'ExportOptions.plist').write_bytes(plistlib.dumps(options))
+          # Configure archive signing as well as export signing. Never print these files.
+          project = pathlib.Path('flutter/ios/Runner.xcodeproj/project.pbxproj')
+          text = project.read_text().replace('INFOPLIST_FILE = Runner/Info.plist;',
+              'INFOPLIST_FILE = Runner/Info.plist;\nDEVELOPMENT_TEAM = "' + team + '";\nCODE_SIGN_STYLE = Manual;\nCODE_SIGN_IDENTITY = "' + ('Apple Development' if os.environ['EXPORT_METHOD'] == 'development' else 'Apple Distribution') + '";\nPROVISIONING_PROFILE = "' + data['UUID'] + '";')
+          project.write_text(text)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('SIGNING_READY=true\n')
+          PY
+      - name: Build signed IPA
+        if: env.SIGNING_READY == 'true'
+        working-directory: flutter
+        run: |
+          set -euo pipefail
+          flutter build ipa --release --no-pub --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
+          nm -gU build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Runner > "$RUNNER_TEMP/signed-ffi-symbols.txt"
+          for symbol in initialize get_channels save_source get_stream_variants get_now_next get_schedule get_catchup set_hidden restore_all_hidden favorite_group swap_favorites get_transfer_info get_disk_space download_file download_progress stop_download relay_open relay_close; do
+            if ! grep -Eq " _${symbol}$" "$RUNNER_TEMP/signed-ffi-symbols.txt"; then
+              echo "::error::Missing archived Rust FFI symbol: $symbol"
+              exit 1
+            fi
+          done
+          python3 - <<'PY'
+          import pathlib, shutil
+          files = list(pathlib.Path('build/ios/ipa').glob('*.ipa'))
+          assert len(files) == 1, 'Expected exactly one signed IPA'
+          shutil.copyfile(files[0], '../brentv-signed.ipa')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: env.SIGNING_READY == 'true'
+        with:
+          name: brentv-signed
+          path: brentv-signed.ipa
+          if-no-files-found: error
+      - name: Remove signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/brentv-signing.keychain-db" >/dev/null 2>&1 || true
+          if [ -f "$RUNNER_TEMP/installed-profile-path" ]; then
+            IFS= read -r profile < "$RUNNER_TEMP/installed-profile-path" || true
+            rm -f "$profile"
+          fi
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/signing.mobileprovision" "$RUNNER_TEMP/ExportOptions.plist" "$RUNNER_TEMP/installed-profile-path"
